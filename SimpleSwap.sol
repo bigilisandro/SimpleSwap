@@ -172,8 +172,7 @@ contract SimpleSwap {
 
         (address token0, address token1) = _sortTokens(tokenA, tokenB);
         
-        uint256 userLp = userLiquidity[msg.sender][token0][token1];
-        if (userLp < liquidity) revert SimpleSwap__InsufficientLiquidity();
+        if (userLiquidity[msg.sender][token0][token1] < liquidity) revert SimpleSwap__InsufficientLiquidity();
         
         Pool storage pool = pools[token0][token1];
         uint256 _totalLiquidity = totalLiquidity[token0][token1];
