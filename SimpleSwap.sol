@@ -129,8 +129,9 @@ contract SimpleSwap {
             liquidity = sqrt(amount0 * amount1);
         } else {
             liquidity = (amount0 * _totalLiquidity) / pool.reserve0;
-            uint256 liquidityB = (amount1 * _totalLiquidity) / pool.reserve1;
-            if (liquidity > liquidityB) liquidity = liquidityB;
+            if (liquidity > (amount1 * _totalLiquidity) / pool.reserve1) {
+                liquidity = (amount1 * _totalLiquidity) / pool.reserve1;
+            }
         }
         
         if (liquidity == 0) revert SimpleSwap__InsufficientLiquidity();
