@@ -118,7 +118,7 @@ contract SimpleSwap {
         
         if (amountA < amountAMin || amountB < amountBMin) revert SimpleSwap__InsufficientAmount();
 
-        (uint256 amount0, uint256 amount1) = tokenA == token0 ? (amountA, amountB) : (amountB, amountA);
+        (uint256 amount0, uint256 amount1) = tokenA == token0 ? (uint256(amountA), uint256(amountB)) : (uint256(amountB), uint256(amountA));
 
         _safeTransferFrom(token0, amount0);
         _safeTransferFrom(token1, amount1);
