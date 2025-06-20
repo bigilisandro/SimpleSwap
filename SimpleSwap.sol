@@ -98,20 +98,18 @@ contract SimpleSwap {
 
         (address token0, address token1) = _sortTokens(tokenA, tokenB);
         Pool storage pool = pools[token0][token1];
-        uint256 reserve0 = pool.reserve0;
-        uint256 reserve1 = pool.reserve1;
 
-        if (reserve0 == 0 && reserve1 == 0) {
+        if (pool.reserve0 == 0 && pool.reserve1 == 0) {
             amountA = amountADesired;
             amountB = amountBDesired;
         } else {
-            uint256 amountBOptimal = (amountADesired * reserve1) / reserve0;
+            uint256 amountBOptimal = (amountADesired * pool.reserve1) / pool.reserve0;
             if (amountBOptimal <= amountBDesired) {
                 if (amountBOptimal < amountBMin) revert SimpleSwap__InsufficientAmount();
                 amountA = amountADesired;
                 amountB = amountBOptimal;
             } else {
-                uint256 amountAOptimal = (amountBDesired * reserve0) / reserve1;
+                uint256 amountAOptimal = (amountBDesired * pool.reserve0) / pool.reserve1;
                 if (amountAOptimal < amountAMin) revert SimpleSwap__InsufficientAmount();
                 amountA = amountAOptimal;
                 amountB = amountBDesired;
@@ -130,8 +128,8 @@ contract SimpleSwap {
         if (_totalLiquidity == 0) {
             liquidity = sqrt(amount0 * amount1);
         } else {
-            liquidity = (amount0 * _totalLiquidity) / reserve0;
-            uint256 liquidityB = (amount1 * _totalLiquidity) / reserve1;
+            liquidity = (amount0 * _totalLiquidity) / pool.reserve0;
+            uint256 liquidityB = (amount1 * _totalLiquidity) / pool.reserve1;
             if (liquidity > liquidityB) liquidity = liquidityB;
         }
         
@@ -175,10 +173,9 @@ contract SimpleSwap {
         if (userLiquidity[msg.sender][token0][token1] < liquidity) revert SimpleSwap__InsufficientLiquidity();
         
         Pool storage pool = pools[token0][token1];
-        uint256 _totalLiquidity = totalLiquidity[token0][token1];
 
-        uint256 amount0 = (liquidity * pool.reserve0) / _totalLiquidity;
-        uint256 amount1 = (liquidity * pool.reserve1) / _totalLiquidity;
+        uint256 amount0 = (liquidity * pool.reserve0) / totalLiquidity[token0][token1];
+        uint256 amount1 = (liquidity * pool.reserve1) / totalLiquidity[token0][token1];
         
         (amountA, amountB) = tokenA == token0 ? (amount0, amount1) : (amount1, amount0);
 
@@ -223,24 +220,16 @@ contract SimpleSwap {
         _safeTransferFrom(tokenIn, amountIn);
 
         Pool storage pool = pools[token0][token1];
-        uint256 reserveIn;
-        uint256 reserveOut;
-
-        if (tokenIn == token0) {
-            reserveIn = pool.reserve0;
-            reserveOut = pool.reserve1;
-        } else {
-            reserveIn = pool.reserve1;
-            reserveOut = pool.reserve0;
-        }
         
-        uint256 amountOut = getAmountOut(amountIn, reserveIn, reserveOut);
-        if (amountOut < amountOutMin) revert SimpleSwap__InsufficientAmount();
-
+        uint256 amountOut;
         if (tokenIn == token0) {
+            amountOut = getAmountOut(amountIn, pool.reserve0, pool.reserve1);
+            if (amountOut < amountOutMin) revert SimpleSwap__InsufficientAmount();
             pool.reserve0 += uint112(amountIn);
             pool.reserve1 -= uint112(amountOut);
         } else {
+            amountOut = getAmountOut(amountIn, pool.reserve1, pool.reserve0);
+            if (amountOut < amountOutMin) revert SimpleSwap__InsufficientAmount();
             pool.reserve1 += uint112(amountIn);
             pool.reserve0 -= uint112(amountOut);
         }
@@ -265,15 +254,13 @@ contract SimpleSwap {
     function getPrice(address tokenA, address tokenB) external view returns (uint256 price) {
         (address token0, address token1) = _sortTokens(tokenA, tokenB);
         Pool storage pool = pools[token0][token1];
-        uint256 reserve0 = pool.reserve0;
-        uint256 reserve1 = pool.reserve1;
         
-        if (reserve0 == 0 || reserve1 == 0) return 0;
+        if (pool.reserve0 == 0 || pool.reserve1 == 0) return 0;
         
         if (tokenA == token0) {
-            return (reserve1 * 1e18) / reserve0;
+            return (pool.reserve1 * 1e18) / pool.reserve0;
         } else {
-            return (reserve0 * 1e18) / reserve1;
+            return (pool.reserve0 * 1e18) / pool.reserve1;
         }
     }
 
