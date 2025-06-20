@@ -176,12 +176,10 @@ contract SimpleSwap {
         if (userLp < liquidity) revert SimpleSwap__InsufficientLiquidity();
         
         Pool storage pool = pools[token0][token1];
-        uint256 reserve0 = pool.reserve0;
-        uint256 reserve1 = pool.reserve1;
         uint256 _totalLiquidity = totalLiquidity[token0][token1];
 
-        uint256 amount0 = (liquidity * reserve0) / _totalLiquidity;
-        uint256 amount1 = (liquidity * reserve1) / _totalLiquidity;
+        uint256 amount0 = (liquidity * pool.reserve0) / _totalLiquidity;
+        uint256 amount1 = (liquidity * pool.reserve1) / _totalLiquidity;
         
         (amountA, amountB) = tokenA == token0 ? (amount0, amount1) : (amount1, amount0);
 
