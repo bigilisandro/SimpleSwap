@@ -118,18 +118,21 @@ contract SimpleSwap {
         
         if (amountA < amountAMin || amountB < amountBMin) revert SimpleSwap__InsufficientAmount();
 
-        (uint256 amount0, uint256 amount1) = tokenA == token0 ? (uint256(amountA), uint256(amountB)) : (uint256(amountB), uint256(amountA));
-
-        _safeTransferFrom(token0, amount0);
-        _safeTransferFrom(token1, amount1);
+        // Transfer tokens directly without intermediate variables
+        if (tokenA == token0) {
+            _safeTransferFrom(token0, amountA);
+            _safeTransferFrom(token1, amountB);
+        } else {
+            _safeTransferFrom(token1, amountA);
+            _safeTransferFrom(token0, amountB);
+        }
 
         if (totalLiquidity[token0][token1] == 0) {
-            liquidity = sqrt(amount0 * amount1);
+            liquidity = sqrt(amountA * amountB);
         } else {
-            liquidity = (amount0 * totalLiquidity[token0][token1]) / pool.reserve0;
-            if (liquidity > (amount1 * totalLiquidity[token0][token1]) / pool.reserve1) {
-                liquidity = (amount1 * totalLiquidity[token0][token1]) / pool.reserve1;
-            }
+            uint256 liquidity0 = (amountA * totalLiquidity[token0][token1]) / pool.reserve0;
+            uint256 liquidity1 = (amountB * totalLiquidity[token0][token1]) / pool.reserve1;
+            liquidity = liquidity0 < liquidity1 ? liquidity0 : liquidity1;
         }
         
         if (liquidity == 0) revert SimpleSwap__InsufficientLiquidity();
@@ -137,8 +140,14 @@ contract SimpleSwap {
         totalLiquidity[token0][token1] += liquidity;
         userLiquidity[to][token0][token1] += liquidity;
 
-        pool.reserve0 += uint112(amount0);
-        pool.reserve1 += uint112(amount1);
+        // Update reserves directly
+        if (tokenA == token0) {
+            pool.reserve0 += uint112(amountA);
+            pool.reserve1 += uint112(amountB);
+        } else {
+            pool.reserve0 += uint112(amountB);
+            pool.reserve1 += uint112(amountA);
+        }
 
         return (amountA, amountB, liquidity);
     }
@@ -176,7 +185,13 @@ contract SimpleSwap {
         uint256 amount0 = (liquidity * pool.reserve0) / totalLiquidity[token0][token1];
         uint256 amount1 = (liquidity * pool.reserve1) / totalLiquidity[token0][token1];
         
-        (amountA, amountB) = tokenA == token0 ? (amount0, amount1) : (amount1, amount0);
+        if (tokenA == token0) {
+            amountA = amount0;
+            amountB = amount1;
+        } else {
+            amountA = amount1;
+            amountB = amount0;
+        }
 
         if (amountA < amountAMin || amountB < amountBMin) revert SimpleSwap__InsufficientAmount();
 
