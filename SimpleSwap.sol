@@ -123,14 +123,12 @@ contract SimpleSwap {
         _safeTransferFrom(token0, amount0);
         _safeTransferFrom(token1, amount1);
 
-        uint256 _totalLiquidity = totalLiquidity[token0][token1];
-
-        if (_totalLiquidity == 0) {
+        if (totalLiquidity[token0][token1] == 0) {
             liquidity = sqrt(amount0 * amount1);
         } else {
-            liquidity = (amount0 * _totalLiquidity) / pool.reserve0;
-            if (liquidity > (amount1 * _totalLiquidity) / pool.reserve1) {
-                liquidity = (amount1 * _totalLiquidity) / pool.reserve1;
+            liquidity = (amount0 * totalLiquidity[token0][token1]) / pool.reserve0;
+            if (liquidity > (amount1 * totalLiquidity[token0][token1]) / pool.reserve1) {
+                liquidity = (amount1 * totalLiquidity[token0][token1]) / pool.reserve1;
             }
         }
         
