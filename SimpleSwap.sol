@@ -1,19 +1,17 @@
-// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 /**
- * @title IERC20
- * @dev Interface for the ERC20 standard.
+ * @dev Interface of the ERC-20 standard as defined in the ERC.
  */
 interface IERC20 {
+    event Transfer(address indexed from, address indexed to, uint256 value);
+    event Approval(address indexed owner, address indexed spender, uint256 value);      
     function totalSupply() external view returns (uint256);
     function balanceOf(address account) external view returns (uint256);
-    function transfer(address recipient, uint256 amount) external returns (bool);
+    function transfer(address to, uint256 value) external returns (bool);
     function allowance(address owner, address spender) external view returns (uint256);
-    function approve(address spender, uint256 amount) external returns (bool);
-    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
-    event Transfer(address indexed from, address indexed to, uint256 value);
-    event Approval(address indexed owner, address indexed spender, uint256 value);
+    function approve(address spender, uint256 value) external returns (bool);
+    function transferFrom(address from, address to, uint256 value) external returns (bool);
 }
 
 /**
@@ -22,82 +20,27 @@ interface IERC20 {
  * @dev This contract allows users to swap tokens, add/remove liquidity, and query prices.
  * It manages multiple liquidity pools within a single contract.
  */
-contract SimpleSwap {
-
-    struct Pool {
-        uint112 reserve0;
-        uint112 reserve1;
+contract SimpleSwap is ERC20 {
+    /// @dev Struct representing a liquidity pool for a token pair
+    struct LiquidityPool {
+        uint256 reserveA;
+        uint256 reserveB;
+        uint256 totalLiquidity;
     }
 
-    mapping(address => mapping(address => Pool)) public pools;
-    mapping(address => mapping(address => mapping(address => uint256))) public userLiquidity;
-    mapping(address => mapping(address => uint256)) public totalLiquidity;
-
-    error SimpleSwap__Expired();
-    error SimpleSwap__InsufficientAmount();
-    error SimpleSwap__InsufficientLiquidity();
-    error SimpleSwap__InvalidPath();
-    error SimpleSwap__IdenticalAddresses();
-    error SimpleSwap__TransferFailed();
+    /// @notice Mapping of token pair hash to liquidity pool data
+    mapping(bytes32 => LiquidityPool) public pairPools;
 
     /**
-     * @notice Sorts token addresses to ensure a unique pair representation.
-     * @dev The pair (tokenA, tokenB) is the same as (tokenB, tokenA). To have a single representation,
-     * we sort them by address.
-     * @param tokenA The address of the first token.
-     * @param tokenB The address of the second token.
-     * @return token0 The token with the lower address.
-     * @return token1 The token with the higher address.
+     * @notice Computes a unique hash for a token pair (order-independent)
      */
-    function _sortTokens(address tokenA, address tokenB) private pure returns (address token0, address token1) {
-        if (tokenA == tokenB) revert SimpleSwap__IdenticalAddresses();
-        (token0, token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
+    function _pairHash(address tokenX, address tokenY) internal pure returns (bytes32) {
+        (address tMin, address tMax) = tokenX < tokenY ? (tokenX, tokenY) : (tokenY, tokenX);
+        return keccak256(abi.encodePacked(tMin, tMax));
     }
 
     /**
-     * @notice Safely transfers ERC20 tokens from the sender to this contract.
-     * @param token The address of the ERC20 token.
-     * @param amount The amount of tokens to transfer.
-     */
-    function _safeTransferFrom(address token, uint256 amount) private {
-        (bool success, bytes memory data) = token.call(
-            abi.encodeWithSignature("transferFrom(address,address,uint256)", msg.sender, address(this), amount)
-        );
-        if (!success || (data.length != 0 && !abi.decode(data, (bool)))) {
-            revert SimpleSwap__TransferFailed();
-        }
-    }
-
-    /**
-     * @notice Safely transfers ERC20 tokens from this contract to a recipient.
-     * @param token The address of the ERC20 token.
-     * @param to The address of the recipient.
-     * @param amount The amount of tokens to transfer.
-     */
-    function _safeTransfer(address token, address to, uint256 amount) private {
-        (bool success, bytes memory data) = token.call(
-            abi.encodeWithSignature("transfer(address,uint256)", to, amount)
-        );
-        if (!success || (data.length != 0 && !abi.decode(data, (bool)))) {
-            revert SimpleSwap__TransferFailed();
-        }
-    }
-    
-    /**
-     * @notice Adds liquidity to an ERC-20 token pair pool.
-     * @dev If the pool does not exist, it's created. The amount of liquidity tokens minted
-     * is based on the ratio of the deposited assets.
-     * @param tokenA The address of one of the tokens in the pair.
-     * @param tokenB The address of the other token in the pair.
-     * @param amountADesired The desired amount of tokenA to add.
-     * @param amountBDesired The desired amount of tokenB to add.
-     * @param amountAMin The minimum amount of tokenA to add, for slippage protection.
-     * @param amountBMin The minimum amount of tokenB to add, for slippage protection.
-     * @param to The address that will receive the liquidity tokens.
-     * @param deadline The time after which the transaction will be reverted.
-     * @return amountA The actual amount of tokenA added.
-     * @return amountB The actual amount of tokenB added.
-     * @return liquidity The amount of liquidity tokens minted.
+     * @notice Adds liquidity to the pool and mints LP tokens
      */
     function addLiquidity(
         address tokenA,
@@ -108,63 +51,53 @@ contract SimpleSwap {
         uint256 amountBMin,
         address to,
         uint256 deadline
-    ) external returns (uint256 amountA, uint256 amountB, uint256 liquidity) {
-        if (block.timestamp > deadline) revert SimpleSwap__Expired();
+    ) public returns (uint256 amountASent, uint256 amountBSent, uint256 liquidity) {
+        require(block.timestamp <= deadline, "Transaction expired");
 
-        (address token0, address token1) = _sortTokens(tokenA, tokenB);
-        Pool storage pool = pools[token0][token1];
+        bytes32 poolId = _pairHash(tokenA, tokenB);
+        LiquidityPool storage pool = pairPools[poolId];
 
-        if (pool.reserve0 == 0 && pool.reserve1 == 0) {
-            amountA = amountADesired;
-            amountB = amountBDesired;
+        if (pool.totalLiquidity == 0) {
+            // First liquidity provision
+            amountASent = amountADesired;
+            amountBSent = amountBDesired;
+            liquidity = sqrt(amountASent * amountBSent);
         } else {
-            uint256 amountBOptimal = (amountADesired * pool.reserve1) / pool.reserve0;
-            if (amountBOptimal <= amountBDesired) {
-                if (amountBOptimal < amountBMin) revert SimpleSwap__InsufficientAmount();
-                amountA = amountADesired;
-                amountB = amountBOptimal;
+            // Calculate optimal amounts based on current reserves
+            uint256 optimalB = (amountADesired * pool.reserveB) / pool.reserveA;
+
+            if (optimalB <= amountBDesired) {
+                require(optimalB >= amountBMin, "Too much slippage on B");
+                amountASent = amountADesired;
+                amountBSent = optimalB;
             } else {
-                uint256 amountAOptimal = (amountBDesired * pool.reserve0) / pool.reserve1;
-                if (amountAOptimal < amountAMin) revert SimpleSwap__InsufficientAmount();
-                amountA = amountAOptimal;
-                amountB = amountBDesired;
+                uint256 optimalA = (amountBDesired * pool.reserveA) / pool.reserveB;
+                require(optimalA >= amountAMin, "Too much slippage on A");
+                amountASent = optimalA;
+                amountBSent = amountBDesired;
             }
-        }
-        
-        if (amountA < amountAMin || amountB < amountBMin) revert SimpleSwap__InsufficientAmount();
 
-        // Transfer tokens directly without intermediate variables
-        if (tokenA == token0) {
-            _safeTransferFrom(token0, amountA);
-            _safeTransferFrom(token1, amountB);
-        } else {
-            _safeTransferFrom(token1, amountA);
-            _safeTransferFrom(token0, amountB);
+            liquidity = min(
+                (amountASent * pool.totalLiquidity) / pool.reserveA,
+                (amountBSent * pool.totalLiquidity) / pool.reserveB
+            );
         }
 
-        if (totalLiquidity[token0][token1] == 0) {
-            liquidity = sqrt(amountA * amountB);
-        } else {
-            uint256 liquidity0 = (amountA * totalLiquidity[token0][token1]) / pool.reserve0;
-            uint256 liquidity1 = (amountB * totalLiquidity[token0][token1]) / pool.reserve1;
-            liquidity = liquidity0 < liquidity1 ? liquidity0 : liquidity1;
-        }
-        
-        if (liquidity == 0) revert SimpleSwap__InsufficientLiquidity();
+        require(liquidity > 0, "Zero liquidity generated");
 
-        totalLiquidity[token0][token1] += liquidity;
-        userLiquidity[to][token0][token1] += liquidity;
+        // Transfer tokens from user to contract
+        IERC20(tokenA).transferFrom(msg.sender, address(this), amountASent);
+        IERC20(tokenB).transferFrom(msg.sender, address(this), amountBSent);
 
-        // Update reserves directly
-        if (tokenA == token0) {
-            pool.reserve0 += uint112(amountA);
-            pool.reserve1 += uint112(amountB);
-        } else {
-            pool.reserve0 += uint112(amountB);
-            pool.reserve1 += uint112(amountA);
-        }
+        // Update pool reserves
+        pool.reserveA += amountASent;
+        pool.reserveB += amountBSent;
+        pool.totalLiquidity += liquidity;
 
-        return (amountA, amountB, liquidity);
+        // Mint LP tokens
+        _mint(to, liquidity);
+
+        return (amountASent, amountBSent, liquidity);
     }
 
     /**
@@ -188,38 +121,33 @@ contract SimpleSwap {
         uint256 amountBMin,
         address to,
         uint256 deadline
-    ) external returns (uint256 amountA, uint256 amountB) {
-        if (block.timestamp > deadline) revert SimpleSwap__Expired();
+    ) public returns (uint256 amountASent, uint256 amountBSent) {
+        require(block.timestamp <= deadline, "Transaction expired");
+        require(balanceOf(msg.sender) >= liquidity, "Not enough LP tokens");
 
-        (address token0, address token1) = _sortTokens(tokenA, tokenB);
-        
-        if (userLiquidity[msg.sender][token0][token1] < liquidity) revert SimpleSwap__InsufficientLiquidity();
-        
-        Pool storage pool = pools[token0][token1];
+        bytes32 poolId = _pairHash(tokenA, tokenB);
+        LiquidityPool storage pool = pairPools[poolId];
 
-        uint256 amount0 = (liquidity * pool.reserve0) / totalLiquidity[token0][token1];
-        uint256 amount1 = (liquidity * pool.reserve1) / totalLiquidity[token0][token1];
-        
-        if (tokenA == token0) {
-            amountA = amount0;
-            amountB = amount1;
-        } else {
-            amountA = amount1;
-            amountB = amount0;
-        }
+        // Calculate amounts to return
+        amountASent = (liquidity * pool.reserveA) / pool.totalLiquidity;
+        amountBSent = (liquidity * pool.reserveB) / pool.totalLiquidity;
 
-        if (amountA < amountAMin || amountB < amountBMin) revert SimpleSwap__InsufficientAmount();
+        require(amountASent >= amountAMin, "Too much slippage on A");
+        require(amountBSent >= amountBMin, "Too much slippage on B");
 
-        userLiquidity[msg.sender][token0][token1] -= liquidity;
-        totalLiquidity[token0][token1] -= liquidity;
-        
-        pool.reserve0 -= uint112(amount0);
-        pool.reserve1 -= uint112(amount1);
+        // Update pool reserves
+        pool.reserveA -= amountASent;
+        pool.reserveB -= amountBSent;
+        pool.totalLiquidity -= liquidity;
 
-        _safeTransfer(token0, to, amount0);
-        _safeTransfer(token1, to, amount1);
+        // Burn LP tokens
+        _burn(msg.sender, liquidity);
 
-        return (amountA, amountB);
+        // Transfer tokens to user
+        IERC20(tokenA).transfer(to, amountASent);
+        IERC20(tokenB).transfer(to, amountBSent);
+
+        return (amountASent, amountBSent);
     }
 
     /**
@@ -238,38 +166,26 @@ contract SimpleSwap {
         address[] calldata path,
         address to,
         uint256 deadline
-    ) external returns (uint256[] memory amounts) {
-        if (block.timestamp > deadline) revert SimpleSwap__Expired();
-        if (path.length != 2) revert SimpleSwap__InvalidPath();
+    ) external {
+        require(block.timestamp <= deadline, "Transaction expired");
+        require(path.length == 2 && amountIn > 0, "Invalid swap path");
 
-        address tokenIn = path[0];
-        address tokenOut = path[1];
-        (address token0, address token1) = _sortTokens(tokenIn, tokenOut);
-        
-        _safeTransferFrom(tokenIn, amountIn);
+        bytes32 poolId = _pairHash(path[0], path[1]);
+        LiquidityPool storage pool = pairPools[poolId];
+        require(pool.totalLiquidity > 0, "No liquidity available");
 
-        Pool storage pool = pools[token0][token1];
-        
-        uint256 amountOut;
-        if (tokenIn == token0) {
-            amountOut = getAmountOut(amountIn, pool.reserve0, pool.reserve1);
-            if (amountOut < amountOutMin) revert SimpleSwap__InsufficientAmount();
-            pool.reserve0 += uint112(amountIn);
-            pool.reserve1 -= uint112(amountOut);
-        } else {
-            amountOut = getAmountOut(amountIn, pool.reserve1, pool.reserve0);
-            if (amountOut < amountOutMin) revert SimpleSwap__InsufficientAmount();
-            pool.reserve1 += uint112(amountIn);
-            pool.reserve0 -= uint112(amountOut);
-        }
+        // Determine which token is which in the pool
+        (uint256 reserveIn, uint256 reserveOut) = _getReserves(pool, path[0], path[1]);
 
-        _safeTransfer(tokenOut, to, amountOut);
+        uint256 outputAmount = getAmountOut(amountIn, reserveIn, reserveOut);
+        require(outputAmount >= amountOutMin, "Output too low");
 
-        amounts = new uint256[](2);
-        amounts[0] = amountIn;
-        amounts[1] = amountOut;
-        
-        return amounts;
+        // Transfer tokens
+        IERC20(path[0]).transferFrom(msg.sender, address(this), amountIn);
+        IERC20(path[1]).transfer(to, outputAmount);
+
+        // Update reserves
+        _updateReserves(pool, path[0], path[1], amountIn, outputAmount);
     }
 
     /**
@@ -281,55 +197,76 @@ contract SimpleSwap {
      * @return price The price of tokenA denominated in tokenB.
      */
     function getPrice(address tokenA, address tokenB) external view returns (uint256 price) {
-        (address token0, address token1) = _sortTokens(tokenA, tokenB);
-        Pool storage pool = pools[token0][token1];
+        bytes32 poolId = _pairHash(tokenA, tokenB);
+        LiquidityPool storage pool = pairPools[poolId];
+        require(pool.reserveA > 0 && pool.reserveB > 0, "No liquidity available");
+
+        (uint256 reserveA, uint256 reserveB) = _getReserves(pool, tokenA, tokenB);
+        price = (reserveB * 1e18) / reserveA;
+    }
+
+    /**
+     * @notice Estimates the output token amount for a given input
+     */
+    function getAmountOut(uint256 amountIn, uint256 reserveIn, uint256 reserveOut) 
+        public pure returns (uint256 amountOut) {
+        require(amountIn > 0 && reserveIn > 0 && reserveOut > 0, "Invalid input");
+        amountOut = (amountIn * reserveOut) / (reserveIn + amountIn);
+    }
+
+    /**
+     * @dev Helper function to get reserves in the correct order
+     */
+    function _getReserves(LiquidityPool storage pool, address tokenA, address tokenB) 
+        internal view returns (uint256 reserveA, uint256 reserveB) {
+        bytes32 poolId = _pairHash(tokenA, tokenB);
+        (address tMin, address tMax) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
         
-        if (pool.reserve0 == 0 || pool.reserve1 == 0) return 0;
-        
-        if (tokenA == token0) {
-            return (pool.reserve1 * 1e18) / pool.reserve0;
+        if (tokenA == tMin) {
+            return (pool.reserveA, pool.reserveB);
         } else {
-            return (pool.reserve0 * 1e18) / pool.reserve1;
+            return (pool.reserveB, pool.reserveA);
         }
     }
 
     /**
-     * @notice Calculates the output amount for a given input amount and reserves.
-     * @dev Implements the constant product formula with a 0.3% fee.
-     * amountOut = (amountIn * 997 * reserveOut) / (reserveIn * 1000 + amountIn * 997)
-     * @param amountIn The amount of input tokens.
-     * @param reserveIn The reserve of the input token in the pool.
-     * @param reserveOut The reserve of the output token in the pool.
-     * @return amountOut The calculated amount of output tokens.
+     * @dev Helper function to update reserves in the correct order
      */
-    function getAmountOut(
-        uint256 amountIn,
-        uint256 reserveIn,
-        uint256 reserveOut
-    ) public pure returns (uint256 amountOut) {
-        if (amountIn == 0 || reserveIn == 0 || reserveOut == 0) return 0;
-        uint256 amountInWithFee = amountIn * 997;
-        uint256 numerator = amountInWithFee * reserveOut;
-        uint256 denominator = (reserveIn * 1000) + amountInWithFee;
-        amountOut = numerator / denominator;
+    function _updateReserves(LiquidityPool storage pool, address tokenIn, address tokenOut, 
+        uint256 amountIn, uint256 amountOut) internal {
+        bytes32 poolId = _pairHash(tokenIn, tokenOut);
+        (address tMin, address tMax) = tokenIn < tokenOut ? (tokenIn, tokenOut) : (tokenOut, tokenIn);
+        
+        if (tokenIn == tMin) {
+            pool.reserveA += amountIn;
+            pool.reserveB -= amountOut;
+        } else {
+            pool.reserveB += amountIn;
+            pool.reserveA -= amountOut;
+        }
     }
 
-    /**
+   /**
      * @notice Calculates the integer square root of a number.
      * @dev Uses the Babylonian method for integer square root.
      * @param y The number to calculate the square root of.
      * @return z The integer square root of y.
      */
-    function sqrt(uint256 y) private pure returns (uint256 z) {
-        if (y > 3) {
-            z = y;
-            uint256 x = y / 2 + 1;
-            while (x < z) {
-                z = x;
-                x = (y / x + x) / 2;
-            }
-        } else if (y != 0) {
-            z = 1;
+    function sqrt(uint256 x) internal pure returns (uint256) {
+        if (x == 0) return 0;
+        uint256 z = (x + 1) / 2;
+        uint256 y = x;
+        while (z < y) {
+            y = z;
+            z = (x / z + z) / 2;
         }
+        return y;
     }
-} 
+
+    /**
+     * @dev Simple minimum function
+     */
+    function min(uint256 a, uint256 b) internal pure returns (uint256) {
+        return a < b ? a : b;
+    }
+}
