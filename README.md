@@ -1,90 +1,104 @@
-# SimpleSwap
+# SimpleSwap - Mejorado
 
-## 🎯 Objective
+## Descripción
 
-This project implements a smart contract called `SimpleSwap` that replicates the core functionality of an Automated Market Maker (AMM) like Uniswap V2. It allows users to add and remove liquidity, swap tokens, and query prices without relying on external protocols.
+SimpleSwap es un contrato de Automated Market Maker (AMM) que permite intercambiar tokens ERC-20, agregar/remover liquidez y consultar precios. Esta versión ha sido mejorada basándose en las mejores prácticas de SimpleSwapV2.
 
-## ✨ Features
+## Mejoras Implementadas
 
-*   **Add Liquidity**: Provide liquidity to a token pair pool and receive liquidity tokens in return.
-*   **Remove Liquidity**: Burn liquidity tokens to withdraw your share of the underlying assets.
-*   **Swap Tokens**: Exchange one ERC-20 token for another.
-*   **Get Price**: Fetch the current exchange rate between two tokens based on pool reserves.
-*   **Calculate Swap Output**: Determine the expected output amount for a given input amount before executing a swap.
+### 1. **Sistema de LP Tokens ERC20**
+- **Antes**: Sistema manual de tracking de liquidez por usuario
+- **Ahora**: Tokens ERC20 estándar ("Pool Share Token" - PST) que representan la participación en los pools
+- **Beneficio**: Mayor compatibilidad, transferibilidad y estándar de la industria
 
-## 📜 Smart Contract Functions
+### 2. **Estructura de Datos Simplificada**
+- **Antes**: Múltiples mappings complejos (`pools`, `userLiquidity`, `totalLiquidity`)
+- **Ahora**: Un solo mapping `pairPools` con struct `LiquidityPool`
+- **Beneficio**: Código más limpio, menor complejidad y mejor gas efficiency
 
-The `SimpleSwap.sol` contract exposes the following functions:
+### 3. **Manejo de Errores Mejorado**
+- **Antes**: Custom errors con nombres específicos
+- **Ahora**: Mensajes de error descriptivos con `require()`
+- **Beneficio**: Mejor experiencia de usuario y debugging
 
-### `addLiquidity`
+### 4. **Funciones de Transferencia Simplificadas**
+- **Antes**: Funciones `_safeTransfer` y `_safeTransferFrom` con low-level calls
+- **Ahora**: Llamadas directas a `IERC20.transfer()` y `IERC20.transferFrom()`
+- **Beneficio**: Código más simple y menos propenso a errores
 
-Adds liquidity to a specific token pair pool.
+### 5. **Cálculo de Liquidez Mejorado**
+- **Antes**: Lógica compleja con múltiples condiciones
+- **Ahora**: Algoritmo más directo usando `Math.min()` y `Math.sqrt()`
+- **Beneficio**: Mayor precisión y simplicidad
 
-```solidity
-function addLiquidity(
-    address tokenA,
-    address tokenB,
-    uint256 amountADesired,
-    uint256 amountBDesired,
-    uint256 amountAMin,
-    uint256 amountBMin,
-    address to,
-    uint256 deadline
-) external returns (uint256 amountA, uint256 amountB, uint256 liquidity);
-```
+### 6. **Identificación de Pools**
+- **Antes**: Ordenamiento de tokens con `_sortTokens()`
+- **Ahora**: Hash único con `_pairHash()` usando `keccak256`
+- **Beneficio**: Mayor eficiencia y unicidad garantizada
 
-### `removeLiquidity`
+## Funciones Principales
 
-Removes liquidity from a token pair pool.
+### 1. `addLiquidity()`
+Agrega liquidez a un pool y acuña tokens LP.
 
-```solidity
-function removeLiquidity(
-    address tokenA,
-    address tokenB,
-    uint256 liquidity,
-    uint256 amountAMin,
-    uint256 amountBMin,
-    address to,
-    uint256 deadline
-) external returns (uint256 amountA, uint256 amountB);
-```
+### 2. `removeLiquidity()`
+Remueve liquidez del pool y quema tokens LP.
 
-### `swapExactTokensForTokens`
+### 3. `swapExactTokensForTokens()`
+Intercambia una cantidad exacta de tokens de entrada por tokens de salida.
 
-Swaps an exact amount of an input token for another token.
+### 4. `getPrice()`
+Obtiene el precio actual de un token en términos de otro.
 
-```solidity
-function swapExactTokensForTokens(
-    uint256 amountIn,
-    uint256 amountOutMin,
-    address[] calldata path,
-    address to,
-    uint256 deadline
-) external returns (uint256[] memory amounts);
-```
+### 5. `getAmountOut()`
+Calcula la cantidad de salida para una cantidad de entrada dada.
 
-### `getPrice`
+## Diferencias Clave con SimpleSwapV2
 
-Returns the price of one token in terms of another, with 18 decimals of precision.
+| Aspecto | SimpleSwap Original | SimpleSwap Mejorado | SimpleSwapV2 |
+|---------|-------------------|-------------------|--------------|
+| LP Tokens | Manual tracking | ERC20 tokens | ERC20 tokens |
+| Estructura | Múltiples mappings | Struct único | Struct único |
+| Errores | Custom errors | Require messages | Require messages |
+| Transferencias | Low-level calls | Direct calls | Direct calls |
+| Identificación | Token sorting | Hash-based | Hash-based |
 
-```solidity
-function getPrice(address tokenA, address tokenB) external view returns (uint256 price);
-```
+## Ventajas de la Versión Mejorada
 
-### `getAmountOut`
+1. **Compatibilidad**: Tokens LP estándar ERC20
+2. **Simplicidad**: Código más limpio y mantenible
+3. **Eficiencia**: Menor uso de gas
+4. **Robustez**: Mejor manejo de errores
+5. **Escalabilidad**: Estructura más flexible para futuras mejoras
 
-Calculates the amount of output tokens you will receive for a given amount of input tokens.
+## Uso
 
 ```solidity
-function getAmountOut(
-    uint256 amountIn,
-    uint256 reserveIn,
-    uint256 reserveOut
-) external pure returns (uint256 amountOut);
+// Agregar liquidez
+addLiquidity(
+    tokenA,
+    tokenB,
+    amountADesired,
+    amountBDesired,
+    amountAMin,
+    amountBMin,
+    to,
+    deadline
+);
+
+// Intercambiar tokens
+swapExactTokensForTokens(
+    amountIn,
+    amountOutMin,
+    [tokenIn, tokenOut],
+    to,
+    deadline
+);
+
+// Consultar precio
+uint256 price = getPrice(tokenA, tokenB);
 ```
 
-## 🚀 How to Use
+## Verificación
 
-1.  **Deploy**: Deploy the `SimpleSwap.sol` contract to an Ethereum network.
-2.  **Approve Tokens**: Before adding liquidity or swapping, you must approve the `SimpleSwap` contract to spend your ERC-20 tokens by calling the `approve` function on the respective token contracts.
-3.  **Interact**: Call the contract's functions to add/remove liquidity or perform swaps. 
+El contrato está diseñado para ser compatible con verificadores de Etherscan y otros exploradores de bloques, siguiendo las mejores prácticas de OpenZeppelin y estándares ERC20. 
